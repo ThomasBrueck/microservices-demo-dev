@@ -18,4 +18,9 @@
 /vote/.idea
 /vote/vote.iml
 
+# Local editor/build caches
+/.vscode
+/.metals
+/vote/.bloop
+
 /browser_screenshots

@@ -59,6 +59,7 @@ public class VoteController {
                     HttpServletResponse response) {
         String voter = voterId;
         String vote = voteInput.getVote();
+        String voteEventId = UUID.randomUUID().toString();
         Vote v = new Vote();
         model.addAttribute("optionA", v.getOptionA());
         model.addAttribute("optionB", v.getOptionB());
@@ -73,7 +74,9 @@ public class VoteController {
         Cookie cookie = new Cookie("voter_id", voter);
         response.addCookie(cookie);
 
-        CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(KAFKA_TOPIC, voter, vote);
+        // Each click must count as a vote, so we use a unique event id as the Kafka message key.
+        // The stable voter_id cookie is still kept for UI/session continuity.
+        CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(KAFKA_TOPIC, voteEventId, vote);
 
         future.whenComplete((result, ex) -> {
             if (ex == null) {
