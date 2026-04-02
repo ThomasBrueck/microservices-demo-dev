@@ -1,5 +1,10 @@
 package com.okteto.vote.controller;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,10 +20,6 @@ import org.thymeleaf.util.StringUtils;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletResponse;
-import java.util.concurrent.CompletableFuture;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.UUID;
 
 @Controller
 public class VoteController {
@@ -73,6 +74,7 @@ public class VoteController {
         Cookie cookie = new Cookie("voter_id", voter);
         response.addCookie(cookie);
 
+        // One vote per client: use stable voter_id as key so worker upsert overwrites prior vote.
         CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(KAFKA_TOPIC, voter, vote);
 
         future.whenComplete((result, ex) -> {

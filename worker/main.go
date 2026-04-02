@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
-
-	"database/sql"
-	"fmt"
+	"syscall"
+	"time"
 
 	_ "github.com/lib/pq"
 
@@ -18,6 +20,7 @@ import (
 var (
 	brokerList        = kingpin.Flag("brokerList", "List of brokers to connect").Default("kafka:9092").Strings()
 	topic             = kingpin.Flag("topic", "Topic name").Default("votes").String()
+	consumerGroupID   = kingpin.Flag("group", "Kafka consumer group id").Default("vote-worker").String()
 	messageCountStart = kingpin.Flag("messageCountStart", "Message counter start from:").Int()
 )
 
@@ -30,53 +33,104 @@ const (
 )
 
 func main() {
+	kingpin.Parse()
+
 	db := openDatabase()
 	defer db.Close()
 
 	pingDatabase(db)
 
-	dropTableStmt := `DROP TABLE IF EXISTS votes`
-	if _, err := db.Exec(dropTableStmt); err != nil {
-		log.Panic(err)
-	}
-
-	createTableStmt := `CREATE TABLE IF NOT EXISTS votes (id VARCHAR(255) NOT NULL UNIQUE, vote VARCHAR(255) NOT NULL)`
+	createTableStmt := `CREATE TABLE IF NOT EXISTS votes (id VARCHAR(255) PRIMARY KEY, vote VARCHAR(255) NOT NULL)`
 	if _, err := db.Exec(createTableStmt); err != nil {
 		log.Panic(err)
 	}
 
-	master := getKafkaMaster()
-	defer master.Close()
+	config := sarama.NewConfig()
+	config.Version = sarama.MaxVersion
+	config.Consumer.Return.Errors = true
+	config.Consumer.Offsets.Initial = sarama.OffsetOldest
 
-	consumer, err := master.ConsumePartition(*topic, 0, sarama.OffsetOldest)
-	if err != nil {
-		log.Panic(err)
-	}
+	group := getKafkaConsumerGroup(config)
+	defer func() {
+		_ = group.Close()
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
-	doneCh := make(chan struct{})
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		for {
-			select {
-			case err := <-consumer.Errors():
-				fmt.Println(err)
-			case msg := <-consumer.Messages():
-				*messageCountStart++
-				fmt.Printf("Received message: user %s vote %s\n", string(msg.Key), string(msg.Value))
-
-				insertDynStmt := `insert into "votes"("id", "vote") values($1, $2) on conflict(id) do update set vote = $2`
-				if _, err := db.Exec(insertDynStmt, *messageCountStart, string(msg.Value)); err != nil {
-					log.Panic(err)
-				}
-			case <-signals:
-				fmt.Println("Interrupt is detected")
-				doneCh <- struct{}{}
-			}
-		}
+		<-signals
+		fmt.Println("Interrupt is detected")
+		cancel()
 	}()
-	<-doneCh
-	log.Println("Processed", *messageCountStart, "messages")
+
+	handler := &voteConsumerGroupHandler{db: db}
+	processed := 0
+	if messageCountStart != nil {
+		processed = *messageCountStart
+	}
+
+	for {
+		if ctx.Err() != nil {
+			break
+		}
+		if err := group.Consume(ctx, []string{*topic}, handler); err != nil {
+			log.Printf("consumer group error: %v", err)
+			time.Sleep(500 * time.Millisecond)
+		}
+		select {
+		case n := <-handler.processedCh:
+			processed += n
+		default:
+		}
+	}
+
+	log.Println("Processed", processed, "messages")
+}
+
+
+type voteConsumerGroupHandler struct {
+	db          *sql.DB
+	processedCh chan int
+}
+
+func (h *voteConsumerGroupHandler) Setup(_ sarama.ConsumerGroupSession) error {
+	if h.processedCh == nil {
+		h.processedCh = make(chan int, 100)
+	}
+	return nil
+}
+
+func (h *voteConsumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error {
+	return nil
+}
+
+func (h *voteConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	for msg := range claim.Messages() {
+		voterID := string(msg.Key)
+		vote := string(msg.Value)
+		if voterID == "" {
+			// Skip messages with empty key to preserve one-vote-per-client semantics.
+			session.MarkMessage(msg, "")
+			continue
+		}
+
+		fmt.Printf("Received message: voter %s vote %s\n", voterID, vote)
+
+		insertStmt := `insert into "votes"("id", "vote") values($1, $2) on conflict(id) do update set vote = $2`
+		if _, err := h.db.Exec(insertStmt, voterID, vote); err != nil {
+			return err
+		}
+
+		session.MarkMessage(msg, "")
+		select {
+		case h.processedCh <- 1:
+		default:
+		}
+	}
+	return nil
 }
 
 func openDatabase() *sql.DB {
@@ -99,17 +153,17 @@ func pingDatabase(db *sql.DB) {
 	}
 }
 
-func getKafkaMaster() sarama.Consumer {
-	kingpin.Parse()
-	config := sarama.NewConfig()
-	config.Consumer.Return.Errors = true
+
+func getKafkaConsumerGroup(config *sarama.Config) sarama.ConsumerGroup {
 	brokers := *brokerList
+	groupID := *consumerGroupID
 	fmt.Println("Waiting for kafka...")
 	for {
-		master, err := sarama.NewConsumer(brokers, config)
-		if err == nil {
-			fmt.Println("Kafka connected!")
-			return master
+		group, err := sarama.NewConsumerGroup(brokers, groupID, config)
+		if err != nil {
+			continue
 		}
+		fmt.Println("Kafka connected!")
+		return group
 	}
 }
