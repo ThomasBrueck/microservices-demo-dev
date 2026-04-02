@@ -109,18 +109,18 @@ func (h *voteConsumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error 
 
 func (h *voteConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for msg := range claim.Messages() {
-		voteEventID := string(msg.Key)
+		voterID := string(msg.Key)
 		vote := string(msg.Value)
-		if voteEventID == "" {
-			// Skip messages with empty key to keep idempotent storage semantics.
+		if voterID == "" {
+			// Skip messages with empty key to preserve one-vote-per-client semantics.
 			session.MarkMessage(msg, "")
 			continue
 		}
 
-		fmt.Printf("Received message: id %s vote %s\n", voteEventID, vote)
+		fmt.Printf("Received message: voter %s vote %s\n", voterID, vote)
 
 		insertStmt := `insert into "votes"("id", "vote") values($1, $2) on conflict(id) do update set vote = $2`
-		if _, err := h.db.Exec(insertStmt, voteEventID, vote); err != nil {
+		if _, err := h.db.Exec(insertStmt, voterID, vote); err != nil {
 			return err
 		}
 
