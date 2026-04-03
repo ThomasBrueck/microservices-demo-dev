@@ -17,6 +17,7 @@ fi
 echo ">>> Iniciando deploy en ${VM_HOST} con tag ${IMAGE_TAG}"
 
 ssh -o StrictHostKeyChecking=no ${VM_USER}@${VM_HOST} \
-    "bash /home/azureuser/deploy.sh ${IMAGE_TAG} ${ACR_LOGIN_SERVER} ${ACR_NAME}"
+    "bash /home/azureuser/microservices-demo-ops/scripts/deploy.sh \
+    ${IMAGE_TAG} ${ACR_LOGIN_SERVER} ${ACR_NAME}"
 
 echo ">>> Deploy finalizado exitosamente"
