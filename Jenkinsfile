@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         // Azure Container Registry
-        ACR_NAME        = 'turegistro'
+        ACR_NAME        = 'acrapp1'
         ACR_LOGIN_SERVER = "${ACR_NAME}.azurecr.io"
         ACR_CREDENTIALS = credentials('acr-credentials')
 
