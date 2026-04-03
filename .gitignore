@@ -24,3 +24,5 @@
 /vote/.bloop
 
 /browser_screenshots
+
+node_modules/
