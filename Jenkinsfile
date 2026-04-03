@@ -123,7 +123,8 @@ pipeline {
                             ${VM_APP_USER} \
                             ${VM_APP_HOST} \
                             ${ACR_LOGIN_SERVER} \
-                            ${IMAGE_TAG}
+                            ${IMAGE_TAG} \
+                            ${ACR_NAME}
                     '''
                 }
             }

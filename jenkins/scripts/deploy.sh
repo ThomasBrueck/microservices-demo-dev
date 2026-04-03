@@ -24,7 +24,7 @@ ssh -o StrictHostKeyChecking=no \
     echo "=== Conectado a la VM App ==="
 
     # Va al directorio del proyecto
-    cd /home/azureuser/microservices-demo
+    cd /home/azureuser/microservices-demo-ops
 
     # Trae los ultimos cambios del docker-compose.yml
     git pull origin main
@@ -33,16 +33,12 @@ ssh -o StrictHostKeyChecking=no \
     export IMAGE_TAG=${IMAGE_TAG}
     export ACR_LOGIN_SERVER=${ACR_LOGIN_SERVER}
 
-    # Descarga las nuevas imagenes del ACR
-    echo "=== Descargando nuevas imagenes del ACR ==="
-    docker compose pull vote worker result
-
-    # Levanta los contenedores actualizados sin tiempo de caida
-    echo "=== Actualizando contenedores ==="
-    docker compose up -d \
-        --no-deps \
-        --force-recreate \
-        vote worker result
+    #incluir todos los workers y agregar login al ACR
+    az acr login --name ${ACR_NAME}
+    sed -i "s/IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env
+    docker-compose pull vote worker-1 worker-2 worker-3 result
+    docker-compose up -d --no-deps --force-recreate \
+    nginx vote worker-1 worker-2 worker-3 result redis
 
     # Muestra el estado de todos los contenedores
     echo "=== Estado actual de los contenedores ==="
