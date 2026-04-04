@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -48,6 +49,14 @@ func main() {
 	config.Version = sarama.MaxVersion
 	config.Consumer.Return.Errors = true
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
+
+	if os.Getenv("KAFKA_SECURITY_PROTOCOL") == "SASL_SSL" {
+		config.Net.TLS.Enable = true
+		config.Net.SASL.Enable = true
+		config.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+		config.Net.SASL.User = os.Getenv("KAFKA_SASL_USERNAME")
+		config.Net.SASL.Password = os.Getenv("KAFKA_SASL_PASSWORD")
+	}
 
 	group := getKafkaConsumerGroup(config)
 	defer func() {
@@ -167,12 +176,20 @@ func pingDatabase(db *sql.DB) {
 
 
 func getKafkaConsumerGroup(config *sarama.Config) sarama.ConsumerGroup {
-	brokers := *brokerList
+	var brokers []string
+	if b := os.Getenv("KAFKA_BOOTSTRAP_SERVERS"); b != "" {
+		brokers = strings.Split(b, ",")
+	} else {
+		brokers = *brokerList
+	}
+	
 	groupID := *consumerGroupID
 	fmt.Println("Waiting for kafka...")
 	for {
 		group, err := sarama.NewConsumerGroup(brokers, groupID, config)
 		if err != nil {
+			fmt.Printf("Kafka connect error: %v\n", err)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		fmt.Println("Kafka connected!")
