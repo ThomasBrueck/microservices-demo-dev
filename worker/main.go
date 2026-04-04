@@ -24,13 +24,12 @@ var (
 	messageCountStart = kingpin.Flag("messageCountStart", "Message counter start from:").Int()
 )
 
-const (
-	host     = "postgresql"
-	port     = 5432
-	user     = "okteto"
-	password = "okteto"
-	dbname   = "votes"
-)
+func getEnvOrDefault(key, fallback string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return fallback
+}
 
 func main() {
 	kingpin.Parse()
@@ -134,12 +133,24 @@ func (h *voteConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSess
 }
 
 func openDatabase() *sql.DB {
-	psqlconn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
+	dbHost := getEnvOrDefault("POSTGRES_HOST", getEnvOrDefault("DATABASE_HOST", "postgresql"))
+	dbPort := getEnvOrDefault("POSTGRES_PORT", "5432")
+	dbUser := getEnvOrDefault("POSTGRES_USER", getEnvOrDefault("DATABASE_USER", "okteto"))
+	dbPass := getEnvOrDefault("POSTGRES_PASSWORD", getEnvOrDefault("DATABASE_PASSWORD", "okteto"))
+	dbName := getEnvOrDefault("POSTGRES_DB", getEnvOrDefault("DATABASE_NAME", "votes"))
+
+	sslMode := "disable"
+	if getEnvOrDefault("DATABASE_SSL", "false") == "true" {
+		sslMode = "require"
+	}
+
+	psqlconn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s", dbHost, dbPort, dbUser, dbPass, dbName, sslMode)
 	for {
 		db, err := sql.Open("postgres", psqlconn)
 		if err == nil {
 			return db
 		}
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -150,6 +161,7 @@ func pingDatabase(db *sql.DB) {
 			fmt.Println("Postgresql connected!")
 			return
 		}
+		time.Sleep(1 * time.Second)
 	}
 }
 
