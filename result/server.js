@@ -113,7 +113,12 @@ io.sockets.on('connection', function (socket) {
 });
 
 var pool = new pg.Pool({
-  connectionString: 'postgres://okteto:okteto@postgresql/votes',
+  user: process.env.POSTGRES_USER || process.env.DATABASE_USER || 'okteto',
+  password: process.env.POSTGRES_PASSWORD || process.env.DATABASE_PASSWORD || 'okteto',
+  host: process.env.POSTGRES_HOST || process.env.DATABASE_HOST || 'postgresql',
+  database: process.env.POSTGRES_DB || process.env.DATABASE_NAME || 'votes',
+  port: process.env.POSTGRES_PORT || 5432,
+  ssl: (process.env.DATABASE_SSL === 'true') ? { rejectUnauthorized: false } : false
 });
 
 async.retry(
